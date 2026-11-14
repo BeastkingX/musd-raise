@@ -194,3 +194,7 @@ a:hover { color: var(--primary-dark); }
   .card { padding: 20px; }
   .header-inner { justify-content: center; text-align: center; }
 }
+
+.alert-neutral { background: #f6f7f6; border-color: #d5dedb; color: #415451; }
+.technical-details { margin-top: 18px; }
+.technical-details summary { cursor: pointer; font-weight: 700; color: var(--primary); }

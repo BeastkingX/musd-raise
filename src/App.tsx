@@ -37,6 +37,14 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    const provider = window.ethereum
+    if (!provider?.on) return
+    const onAccounts = (accounts: readonly `0x${string}`[]) => setWalletAddress(accounts[0] ?? null)
+    provider.on('accountsChanged', onAccounts)
+    return () => provider.removeListener('accountsChanged', onAccounts)
+  }, [])
+
   // Re-read the URL on back/forward navigation.
   useEffect(() => {
     const onPop = () => setCampaign(campaignFromLocation())
@@ -68,7 +76,7 @@ export default function App() {
 
       <main className="container main">
         {campaign ? (
-          <CampaignPage campaign={campaign} />
+          <CampaignPage key={window.location.search} campaign={campaign} />
         ) : (
           <CreateCampaign
             walletAddress={walletAddress}

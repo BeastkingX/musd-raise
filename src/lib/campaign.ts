@@ -8,6 +8,7 @@ export interface Campaign {
   recipient: string
   /** Block number when the campaign was created — donations before this don't count */
   startBlock: number
+  signature?: string
 }
 
 /**
@@ -29,6 +30,7 @@ export function campaignToSearchParams(campaign: Campaign): URLSearchParams {
   params.set('organiser', campaign.organiser)
   params.set('recipient', campaign.recipient)
   params.set('startBlock', String(campaign.startBlock))
+  if (campaign.signature !== undefined) params.set('signature', campaign.signature)
   return params
 }
 
@@ -55,9 +57,14 @@ export function campaignFromSearchParams(
   const startBlock = Number(startBlockRaw)
   if (!Number.isFinite(startBlock) || startBlock < 0) return null
 
-  return { title, story, goal, organiser, recipient, startBlock }
+  return { title, story, goal, organiser, recipient, startBlock, signature: params.has('signature') ? params.get('signature') ?? '' : undefined }
 }
 
 export function hasCampaignParams(search: string): boolean {
   return campaignFromSearchParams(search) !== null
+}
+
+/** Unambiguous, versioned message: JSON preserves every field exactly. */
+export function campaignMessage(c: Campaign): string {
+  return 'MUSD Raise campaign signature v1\n' + JSON.stringify([c.title, c.story, c.goal, c.organiser, c.recipient, c.startBlock])
 }

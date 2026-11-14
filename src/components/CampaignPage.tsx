@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { formatUnits, isAddress, parseUnits } from 'viem'
-import type { Campaign } from '../lib/campaign'
+import { formatUnits, isAddress, parseUnits, recoverMessageAddress, type Hex } from 'viem'
+import { campaignMessage, type Campaign } from '../lib/campaign'
 import { fetchDonations, type Donation, type DonationResult } from '../lib/explorer'
 import {
   MUSD_DECIMALS,
@@ -23,6 +23,21 @@ export default function CampaignPage({ campaign }: CampaignPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [showShare, setShowShare] = useState(false)
+  const [verification, setVerification] = useState<'checking' | 'verified' | 'invalid' | 'unsigned'>(campaign.signature === undefined ? 'unsigned' : 'checking')
+
+  useEffect(() => {
+    let cancelled = false
+    if (campaign.signature === undefined) { setVerification('unsigned'); return }
+    setVerification('checking')
+    async function check() {
+      try {
+        const signer = await recoverMessageAddress({ message: campaignMessage(campaign), signature: campaign.signature as Hex })
+        if (!cancelled) setVerification(isAddress(campaign.recipient) && signer.toLowerCase() === campaign.recipient.toLowerCase() ? 'verified' : 'invalid')
+      } catch { if (!cancelled) setVerification('invalid') }
+    }
+    void check()
+    return () => { cancelled = true }
+  }, [campaign])
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -86,6 +101,10 @@ export default function CampaignPage({ campaign }: CampaignPageProps) {
         <p className="organiser">
           Organised by <strong>{campaign.organiser}</strong>
         </p>
+        {verification === 'verified' && <p className="alert alert-success">✓ Verified: signed by the recipient wallet</p>}
+        {verification === 'unsigned' && <p className="alert alert-neutral">Unverified campaign — there is no recipient signature. Check the recipient independently before donating.</p>}
+        {verification === 'checking' && <p className="muted" role="status">Checking campaign signature…</p>}
+        {verification === 'invalid' && <p className="alert alert-error" role="alert">Warning: this signature does not match the campaign or recipient. The link may have been altered. Donations are disabled.</p>}
         <p className="story">{campaign.story}</p>
 
         <div className="recipient-line">
@@ -98,10 +117,7 @@ export default function CampaignPage({ campaign }: CampaignPageProps) {
           >
             {shortenAddress(campaign.recipient)} ↗
           </a>
-          <span className="muted small">
-            {' '}
-            · started at block {campaign.startBlock.toLocaleString()}
-          </span>
+
         </div>
 
         {goalReached && (
@@ -154,23 +170,17 @@ export default function CampaignPage({ campaign }: CampaignPageProps) {
           </div>
         ) : (
           <p className="muted small">
-            {lastUpdated && (
-              <>
-                Updated {lastUpdated.toLocaleTimeString()} · auto-refreshes every 20 seconds ·{' '}
-              </>
-            )}
-            {result?.source === 'rpc-fallback'
-              ? 'Showing data via RPC fallback (explorer was unavailable).'
-              : 'Totals counted from MUSD transfers to the recipient wallet since the campaign started.'}
-            {result?.truncated && (
-              <> Note: there were a lot of donations, so only the most recent ones are shown.</>
-            )}{' '}
-            <button type="button" className="link-button" onClick={() => void load()}>
-              Refresh now
-            </button>
+            {lastUpdated && <>Updated {lastUpdated.toLocaleTimeString()} · </>}
+            <button type="button" className="link-button" onClick={() => void load()}>Refresh</button>
+            {result?.truncated && <> · Totals are incomplete because there are too many transfers.</>}
           </p>
         )}
 
+        <details className="technical-details">
+          <summary>Technical details</summary>
+          <p className="small muted">Start block: {campaign.startBlock.toLocaleString()}. Totals count incoming MUSD transfers from this block, including unrelated transfers. Progress refreshes every 20 seconds. Data source: {result?.source === 'rpc-fallback' ? 'RPC fallback' : 'Blockscout explorer'}.</p>
+          <p className="small muted">A signature proves control of the recipient address at signing time, not the organiser’s identity or trustworthiness. Anyone can remove a signature, making a link unverified.</p>
+        </details>
         <div className="campaign-actions">
           <button type="button" className="btn btn-secondary" onClick={() => setShowShare((s) => !s)}>
             {showShare ? 'Hide share link' : 'Share this campaign'}
@@ -184,7 +194,7 @@ export default function CampaignPage({ campaign }: CampaignPageProps) {
       {showShare && <SharePanel campaign={campaign} />}
 
       <div className="campaign-grid">
-        <DonateBox recipient={campaign.recipient} onDonationSuccess={() => void load()} />
+        <DonateBox recipient={campaign.recipient} disabled={verification === 'invalid' || verification === 'checking' || !isAddress(campaign.recipient)} onDonationSuccess={() => void load()} />
         <SupporterList donations={result?.donations ?? []} loading={loading && !result} />
       </div>
     </div>

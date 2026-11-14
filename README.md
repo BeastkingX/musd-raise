@@ -38,7 +38,7 @@ smart contract — it deploys on Vercel as a static site.
   from the campaign start block onwards, read from the Blockscout explorer
   API (see [How “raised” is calculated](#how-raised-is-calculated)).
 - Loads and shows progress **without any wallet connected**.
-- **Donate box:** preset amounts (10 / 25 / 50 / 100 MUSD) plus a custom
+- **Donate box:** preset amounts (1 / 5 / 10 / 25 / 50 / 100 MUSD) plus a custom
   amount. Connect wallet, see your MUSD balance, get a warning if it is too
   low or your wallet is on the wrong network. “Donate” calls `transfer()` on
   the MUSD contract to send MUSD to the recipient.
@@ -50,8 +50,9 @@ smart contract — it deploys on Vercel as a static site.
 
 ### 3. “Need test MUSD?” help section
 
-Links to the [Mezo testnet faucet](https://faucet.test.mezo.org) and explains
-in plain English that this runs on a test network with free, worthless tokens.
+1. Get test BTC from the [Mezo testnet faucet](https://faucet.test.mezo.org). The faucet provides test BTC and MEZO, **not MUSD**. Keep some BTC for gas fees.
+2. Sign in and connect the same wallet on [Mezo's testnet borrow page](https://testnet.mezo.org/feature/borrow). Borrow test MUSD using test BTC as collateral; review the terms and confirm. Follow the [official borrowing guide](https://mezo.org/docs/users/borrow/mint-musd/).
+3. Return to your campaign link and donate with that wallet. Testnet tokens have no real-world value.
 
 ---
 
@@ -164,10 +165,9 @@ can.
 
 2. **Get test tokens**
 
-   - Go to the [faucet](https://faucet.test.mezo.org), connect your wallet,
-     and claim test BTC and/or test MUSD. Wait until the tokens appear in
-     MetaMask (you may need to add the MUSD token manually with the contract
-     address above).
+   - Get test BTC from the [faucet](https://faucet.test.mezo.org). It provides test BTC and MEZO, not MUSD. Save some BTC for fees.
+   - Open [Mezo Testnet Borrow](https://testnet.mezo.org/feature/borrow), sign in and connect the same wallet. Use test BTC as collateral to borrow test MUSD, reviewing the loan terms first. See the [official Mezo borrowing guide](https://mezo.org/docs/users/borrow/mint-musd/).
+   - Return to MUSD Raise and donate using that wallet. Add the MUSD token in MetaMask if needed using the contract address above.
 
 3. **Create a campaign**
 
@@ -262,9 +262,7 @@ can.
   Anyone with the link can view the campaign, and there is no way to edit a
   campaign after creating it (create a new link instead). There is also no
   way to delete or hide a campaign.
-- **No identity or trust.** Anyone can create a campaign claiming any
-  recipient address, and anyone can send MUSD to any address. Always check
-  the recipient address on the explorer before donating.
+- **Signatures do not prove identity or trust.** A valid signature proves the recipient wallet signed the displayed fields, not that the organiser's name or story is true. Anyone can remove the signature and create an unverified link; always independently verify the recipient. Smart-contract wallets using EIP-1271 are not supported by this EOA signature check.
 - **Explorer dependence.** Totals come from the public Blockscout API. If it
   is down or rate-limits you, the app falls back to chunked `eth_getLogs`,
   which is slower for old campaigns. Either way, totals are only as fresh
@@ -279,10 +277,21 @@ can.
   code with real funds without a proper audit and a custom contract.
 - **Wallet required to donate.** The campaign page is readable without a
   wallet, but donating needs MetaMask (or another injected wallet) and test
-  MUSD from the faucet.
+  MUSD borrowed against test BTC as explained above.
 
 ---
 
 ## License
 
 Testnet demo — use freely, at your own risk. Not financial advice.
+
+## Campaign signatures and testing
+
+When a wallet is connected while creating, it must be the recipient wallet. The organiser signs a free EIP-191 message containing all six fields; rejecting the request cancels creation. No transaction or gas is needed for signing. Without a connected wallet the campaign is unverified.
+
+1. Connect the recipient wallet, fill in the campaign and create it. Approve the **signature** in MetaMask; copy the resulting link and open it. The green verified badge should appear.
+2. Change the title or recipient in that URL while leaving the signature intact. The red warning appears and donating is disabled. The same applies to edits to the story, goal, organiser, or start block.
+3. Remove the `signature` query parameter, or create without connecting a wallet: the page shows **Unverified campaign**, and donating is allowed. Removing a signature cannot be detected as tampering, so always check unverified links independently.
+4. Reject the signing request and confirm that no campaign link is created. The signature is not a transaction.
+
+The live-example button is hidden until `LIVE_EXAMPLE_URL` in `src/lib/constants.ts` is set to a real campaign link.

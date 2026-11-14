@@ -25,14 +25,15 @@ type DonateStatus =
   | 'success'
   | 'failed'
 
-const PRESETS = ['10', '25', '50', '100']
+const PRESETS = ['1', '5', '10', '25', '50', '100']
 
 interface DonateBoxProps {
   recipient: string
   onDonationSuccess: () => void
+  disabled?: boolean
 }
 
-export default function DonateBox({ recipient, onDonationSuccess }: DonateBoxProps) {
+export default function DonateBox({ recipient, onDonationSuccess, disabled = false }: DonateBoxProps) {
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const [chainId, setChainId] = useState<number | null>(null)
   const [balance, setBalance] = useState<bigint | null>(null)
@@ -132,13 +133,14 @@ export default function DonateBox({ recipient, onDonationSuccess }: DonateBoxPro
     if (wei <= BigInt(0)) return { error: 'The amount must be more than 0 MUSD.' }
     if (balance !== null && wei > balance) {
       return {
-        error: `That is more than your balance (${formatUnits(balance, MUSD_DECIMALS)} MUSD). Please donate a smaller amount, or get more test MUSD from the faucet below.`,
+        error: `That is more than your balance (${formatUnits(balance, MUSD_DECIMALS)} MUSD). Please donate a smaller amount, or borrow test MUSD as explained below.`,
       }
     }
     return { wei }
   }
 
   async function handleDonate() {
+    if (disabled) return
     setErrorMessage(null)
     setTxHash(null)
 
@@ -234,12 +236,12 @@ export default function DonateBox({ recipient, onDonationSuccess }: DonateBoxPro
             <BalanceHint balance={balance} amount={amount} />
           )}
         </div>
-      ) : (
+      ) : hasInjectedWallet() ? (
         <p className="muted">
           Connect your wallet to donate. The button will automatically add
           Mezo Testnet to MetaMask if it is not there yet.
         </p>
-      )}
+      ) : null}
 
       <div className="preset-row" role="group" aria-label="Preset amounts">
         {PRESETS.map((preset) => (
@@ -318,7 +320,7 @@ export default function DonateBox({ recipient, onDonationSuccess }: DonateBoxPro
         type="button"
         className="btn btn-primary btn-block"
         onClick={handleDonate}
-        disabled={busy || !hasInjectedWallet()}
+        disabled={busy || disabled || !hasInjectedWallet()}
       >
         {!walletAddress
           ? connecting
@@ -356,7 +358,7 @@ function BalanceHint({ balance, amount }: { balance: bigint; amount: string }) {
   if (balance === BigInt(0)) {
     return (
       <p className="alert alert-warning" role="alert">
-        Your MUSD balance is 0. Get some free test MUSD from the faucet below
+        Your MUSD balance is 0. Borrow test MUSD using the steps below
         before donating.
       </p>
     )

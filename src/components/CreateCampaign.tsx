@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
-import { isAddress, parseUnits } from 'viem'
-import type { Campaign } from '../lib/campaign'
+import { createWalletClient, custom, isAddress, parseUnits, type Address } from 'viem'
+import { campaignMessage, campaignToSearchParams, type Campaign } from '../lib/campaign'
+import { LIVE_EXAMPLE_URL } from '../lib/constants'
 import { fetchCurrentBlockNumber } from '../lib/explorer'
 import { MUSD_DECIMALS } from '../lib/constants'
 import SharePanel from './SharePanel'
@@ -118,23 +119,23 @@ export default function CreateCampaign({
         recipient: form.recipient.trim(),
         startBlock,
       }
+      if (walletAddress) {
+        if (walletAddress.toLowerCase() !== campaign.recipient.toLowerCase()) {
+          throw new Error('To create a verified campaign, connect the recipient wallet. Disconnect it to create an unverified campaign.')
+        }
+        if (!window.ethereum) throw new Error('Wallet not found. Please reconnect and try again.')
+        const client = createWalletClient({ transport: custom(window.ethereum) })
+        campaign.signature = await client.signMessage({ account: walletAddress as Address, message: campaignMessage(campaign) })
+      }
       setCreated(campaign)
       // Update the URL so a refresh keeps this campaign, and the address
       // bar shows the shareable link.
-      const params = new URLSearchParams({
-        title: campaign.title,
-        story: campaign.story,
-        goal: campaign.goal,
-        organiser: campaign.organiser,
-        recipient: campaign.recipient,
-        startBlock: String(campaign.startBlock),
-      })
+      const params = campaignToSearchParams(campaign)
       window.history.pushState({}, '', `?${params.toString()}`)
       window.scrollTo({ top: 0, behavior: 'smooth' })
-    } catch {
-      setErrors({
-        form: 'Could not reach the Mezo Testnet network to record the start block. Please check your internet connection and try again.',
-      })
+    } catch (error) {
+      const message = (error as Error)?.message || ''
+      setErrors({ form: /reject|denied/i.test(message) ? 'Signature rejected. Your campaign was not created; please try again.' : message || 'Could not create the campaign. Please check your connection and try again.' })
     } finally {
       setCreating(false)
     }
@@ -170,21 +171,22 @@ export default function CreateCampaign({
         </p>
         <ol className="steps">
           <li>
-            <strong>1. Create</strong> — fill in the form below.
+            <strong>Create</strong> — fill in the form below.
           </li>
           <li>
-            <strong>2. Share</strong> — send your link to anyone.
+            <strong>Share</strong> — send your link to anyone.
           </li>
           <li>
-            <strong>3. Donate</strong> — supporters send MUSD to your wallet.
+            <strong>Donate</strong> — supporters send MUSD to your wallet.
           </li>
         </ol>
+        {LIVE_EXAMPLE_URL && <a className="btn btn-secondary" href={LIVE_EXAMPLE_URL}>See a live example →</a>}
       </section>
 
       <section className="card" aria-labelledby="create-heading">
         <h2 id="create-heading">Create a campaign</h2>
         <p className="muted">
-          Donations go directly to the recipient wallet address below. Make
+          If a wallet is connected, you will be asked to sign a free message (not a transaction). To verify the campaign, connect the recipient wallet. Donations go directly to the recipient wallet address below. Make
           sure that address is correct — MUSD sent to the wrong address cannot
           be taken back.
         </p>

@@ -89,3 +89,6 @@ export function explorerTxUrl(txHash: string): string {
 export function explorerAddressUrl(address: string): string {
   return `${MEZO_EXPLORER_URL}/address/${address}`
 }
+
+// Set this to a campaign URL to show the home-page example button.
+export const LIVE_EXAMPLE_URL: string = ''
