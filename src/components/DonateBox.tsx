@@ -5,18 +5,9 @@ import {
   MUSD_DECIMALS,
   explorerTxUrl,
 } from '../lib/constants'
-import {
-  connectWallet,
-  donateMusd,
-  fetchMusdBalance,
-  friendlyWalletError,
-  getConnectedAccounts,
-  getConnectedChainId,
-  hasInjectedWallet,
-  isUserRejection,
-  parseMusdAmount,
-  waitForReceipt,
-} from '../lib/wallet'
+import { donateMusd, fetchMusdBalance, getConnectedChainId, parseMusdAmount, waitForReceipt, walletError, type WalletError } from '../lib/wallet'
+import { useWallet } from '../lib/WalletContext'
+import { ErrorNotice } from './WalletControls' 
 
 type DonateStatus =
   | 'idle'
@@ -34,17 +25,16 @@ interface DonateBoxProps {
 }
 
 export default function DonateBox({ recipient, onDonationSuccess, disabled = false }: DonateBoxProps) {
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  const [chainId, setChainId] = useState<number | null>(null)
+  const { address: walletAddress, chainId, provider, wallets, connecting, connect } = useWallet()
   const [balance, setBalance] = useState<bigint | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [amount, setAmount] = useState('25')
   const [status, setStatus] = useState<DonateStatus>('idle')
   const [txHash, setTxHash] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [connecting, setConnecting] = useState(false)
+  const [donationError, setDonationError] = useState<WalletError | null>(null)
 
-  const wrongNetwork = chainId !== null && chainId !== MEZO_TESTNET_CHAIN_ID
+  const wrongNetwork = chainId !== MEZO_TESTNET_CHAIN_ID
   const busy = status === 'waiting' || status === 'confirming' || connecting
 
   const refreshBalance = useCallback(async (address: string) => {
@@ -59,67 +49,15 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
     }
   }, [])
 
-  // On load, notice if a wallet is already connected (but don't force it).
   useEffect(() => {
-    let cancelled = false
-    async function checkExisting() {
-      if (!hasInjectedWallet()) return
-      const accounts = await getConnectedAccounts()
-      const id = await getConnectedChainId()
-      if (cancelled) return
-      setChainId(id)
-      if (accounts.length > 0) {
-        setWalletAddress(accounts[0])
-        void refreshBalance(accounts[0])
-      }
-    }
-    void checkExisting()
-    return () => {
-      cancelled = true
-    }
-  }, [refreshBalance])
-
-  // Keep chain / account in sync if the user switches in MetaMask.
-  useEffect(() => {
-    if (!hasInjectedWallet()) return
-    const provider = window.ethereum
-    if (!provider?.on) return
-
-    const onAccounts = async () => {
-      const accounts = await getConnectedAccounts()
-      if (accounts.length > 0) {
-        setWalletAddress(accounts[0])
-        void refreshBalance(accounts[0])
-      } else {
-        setWalletAddress(null)
-        setBalance(null)
-      }
-    }
-    const onChain = async () => {
-      setChainId(await getConnectedChainId())
-    }
-    provider.on('accountsChanged', onAccounts)
-    provider.on('chainChanged', onChain)
-    return () => {
-      provider.removeListener?.('accountsChanged', onAccounts)
-      provider.removeListener?.('chainChanged', onChain)
-    }
-  }, [refreshBalance])
-
-  async function handleConnect() {
-    setConnecting(true)
-    setErrorMessage(null)
-    try {
-      const { address, chainId: id } = await connectWallet()
-      setWalletAddress(address)
-      setChainId(id)
-      await refreshBalance(address)
-    } catch (error) {
-      setErrorMessage(friendlyWalletError(error))
-    } finally {
-      setConnecting(false)
-    }
-  }
+    let alive = true
+    setBalance(null)
+    if (walletAddress) {
+      setBalanceLoading(true)
+      void fetchMusdBalance(walletAddress).then(value => { if (alive) setBalance(value) }).catch(() => { if (alive) setBalance(null) }).finally(() => { if (alive) setBalanceLoading(false) })
+    } else setBalanceLoading(false)
+    return () => { alive = false }
+  }, [walletAddress])
 
   function validateAmount(): { wei: bigint } | { error: string } {
     const trimmed = amount.trim()
@@ -142,15 +80,16 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
   async function handleDonate() {
     if (disabled) return
     setErrorMessage(null)
+    setDonationError(null)
     setTxHash(null)
 
     if (!walletAddress) {
-      await handleConnect()
+      connect()
       return
     }
     if (wrongNetwork) {
       setErrorMessage(
-        'Your wallet is on the wrong network. Please switch to Mezo Testnet — the Connect button will do it for you.',
+        'Please switch to Mezo Testnet using the network banner above.',
       )
       return
     }
@@ -163,17 +102,17 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
 
     setStatus('waiting')
     try {
-      // Make sure we're on Mezo Testnet before sending.
-      const { chainId: id } = await connectWallet()
-      setChainId(id)
-      if (id !== MEZO_TESTNET_CHAIN_ID) {
-        throw new Error('Wallet is not on Mezo Testnet.')
-      }
+      if (!provider) throw new Error('No wallet is selected.')
+      const id = await getConnectedChainId(provider)
+      if (id !== MEZO_TESTNET_CHAIN_ID) throw new Error('Wallet is not on Mezo Testnet.')
+      const accounts = await provider.request({ method: 'eth_accounts' }) as string[]
+      if (!accounts[0] || accounts[0].toLowerCase() !== walletAddress.toLowerCase()) throw new Error('Wallet account changed. Please review and try again.')
 
       const hash = await donateMusd({
         from: walletAddress,
         recipient,
         amount: validation.wei,
+        provider,
       })
       setTxHash(hash)
       setStatus('confirming')
@@ -186,11 +125,7 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
       onDonationSuccess()
     } catch (error) {
       setStatus('failed')
-      if (isUserRejection(error)) {
-        setErrorMessage(friendlyWalletError(error))
-      } else {
-        setErrorMessage(friendlyWalletError(error))
-      }
+      setDonationError(walletError(error, 'donation'))
     }
   }
 
@@ -205,13 +140,12 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
     <section className="card donate-card" aria-labelledby="donate-heading">
       <h2 id="donate-heading">Donate MUSD</h2>
 
-      {!hasInjectedWallet() && (
+      {!provider && wallets.length === 0 && !window.ethereum && (
         <p className="alert alert-warning">
-          No wallet detected in this browser. Please install{' '}
-          <a href="https://metamask.io/download/" target="_blank" rel="noreferrer">
-            MetaMask
-          </a>{' '}
-          to donate. You can still read this campaign without a wallet.
+          {/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? <>
+            Open this page inside the MetaMask app's browser to donate.{' '}
+            <a href={`https://metamask.app.link/dapp/${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`}>Open in MetaMask ↗</a>
+          </> : <>No wallet detected in this browser. Please install <a href="https://metamask.io/download/" target="_blank" rel="noreferrer">MetaMask</a> to donate.</>}
         </p>
       )}
 
@@ -223,20 +157,11 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
           <p className="balance-line">
             Your MUSD balance: <strong>{balanceText}</strong>
           </p>
-          {wrongNetwork && (
-            <p className="alert alert-warning" role="alert">
-              ⚠️ Your wallet is on the wrong network (chain {chainId}). Donations
-              only work on <strong>Mezo Testnet</strong> (chain {MEZO_TESTNET_CHAIN_ID}).{' '}
-              <button type="button" className="link-button" onClick={handleConnect} disabled={connecting}>
-                Switch to Mezo Testnet
-              </button>
-            </p>
-          )}
           {balance !== null && !wrongNetwork && (
             <BalanceHint balance={balance} amount={amount} />
           )}
         </div>
-      ) : hasInjectedWallet() ? (
+      ) : (wallets.length > 0 || !!window.ethereum) ? (
         <p className="muted">
           Connect your wallet to donate. The button will automatically add
           Mezo Testnet to MetaMask if it is not there yet.
@@ -272,6 +197,7 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
         />
       </div>
 
+      {donationError && <ErrorNotice error={donationError} />}
       {errorMessage && (
         <p className="alert alert-error" role="alert">
           {errorMessage}
@@ -320,7 +246,7 @@ export default function DonateBox({ recipient, onDonationSuccess, disabled = fal
         type="button"
         className="btn btn-primary btn-block"
         onClick={handleDonate}
-        disabled={busy || disabled || !hasInjectedWallet()}
+        disabled={busy || disabled || (!provider && wallets.length === 0 && !window.ethereum) || (!!walletAddress && wrongNetwork)}
       >
         {!walletAddress
           ? connecting

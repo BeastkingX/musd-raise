@@ -3,6 +3,9 @@ import { createWalletClient, custom, isAddress, parseUnits, type Address } from 
 import { campaignMessage, campaignToSearchParams, type Campaign } from '../lib/campaign'
 import { LIVE_EXAMPLE_URL } from '../lib/constants'
 import { fetchCurrentBlockNumber } from '../lib/explorer'
+import { useWallet } from '../lib/WalletContext'
+import { walletError, type WalletError } from '../lib/wallet'
+import { ErrorNotice } from './WalletControls'
 import { MUSD_DECIMALS } from '../lib/constants'
 import SharePanel from './SharePanel'
 
@@ -41,6 +44,8 @@ export default function CreateCampaign({
     organiser: '',
     recipient: walletAddress ?? '',
   })
+  const { provider } = useWallet()
+  const [signError, setSignError] = useState<WalletError | null>(null)
   const [errors, setErrors] = useState<FormErrors>({})
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<Campaign | null>(null)
@@ -107,6 +112,7 @@ export default function CreateCampaign({
 
     setCreating(true)
     setErrors({})
+    setSignError(null)
     try {
       // Record the current block as the campaign start. Only MUSD
       // transfers to the recipient from this block onwards will count.
@@ -123,9 +129,9 @@ export default function CreateCampaign({
         if (walletAddress.toLowerCase() !== campaign.recipient.toLowerCase()) {
           throw new Error('To create a verified campaign, connect the recipient wallet. Disconnect it to create an unverified campaign.')
         }
-        if (!window.ethereum) throw new Error('Wallet not found. Please reconnect and try again.')
-        const client = createWalletClient({ transport: custom(window.ethereum) })
-        campaign.signature = await client.signMessage({ account: walletAddress as Address, message: campaignMessage(campaign) })
+        if (!provider) throw new Error('Wallet not found. Please reconnect and try again.')
+        const client = createWalletClient({ transport: custom(provider) })
+        try { campaign.signature = await client.signMessage({ account: walletAddress as Address, message: campaignMessage(campaign) }) } catch (error) { setSignError(walletError(error, 'signature')); return }
       }
       setCreated(campaign)
       // Update the URL so a refresh keeps this campaign, and the address
@@ -134,8 +140,7 @@ export default function CreateCampaign({
       window.history.pushState({}, '', `?${params.toString()}`)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (error) {
-      const message = (error as Error)?.message || ''
-      setErrors({ form: /reject|denied/i.test(message) ? 'Signature rejected. Your campaign was not created; please try again.' : message || 'Could not create the campaign. Please check your connection and try again.' })
+      setSignError(walletError(error, 'signature'))
     } finally {
       setCreating(false)
     }
@@ -288,6 +293,7 @@ export default function CreateCampaign({
             )}
           </div>
 
+          {signError && <ErrorNotice error={signError} />}
           {errors.form && (
             <p className="alert alert-error" role="alert">
               {errors.form}

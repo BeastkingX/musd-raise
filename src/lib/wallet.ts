@@ -10,7 +10,6 @@ import {
 import {
   MEZO_EXPLORER_URL,
   MEZO_RPC_URL,
-  MEZO_TESTNET_CHAIN_ID,
   MEZO_TESTNET_CHAIN_ID_HEX,
   MUSD_CONTRACT_ADDRESS,
   MUSD_DECIMALS,
@@ -24,16 +23,8 @@ declare global {
   }
 }
 
-export function hasInjectedWallet(): boolean {
-  return typeof window !== 'undefined' && !!window.ethereum
-}
-
 export function getInjectedProvider(): EIP1193Provider {
-  if (!window.ethereum) {
-    throw new Error(
-      'No wallet found in this browser. Please install MetaMask (or another wallet) and try again.',
-    )
-  }
+  if (!window.ethereum) throw new Error('No wallet found in this browser.')
   return window.ethereum
 }
 
@@ -42,79 +33,42 @@ export const publicClient = createPublicClient({
   transport: http(MEZO_RPC_URL),
 })
 
-/** Ask MetaMask to switch to Mezo Testnet, adding the network if needed. */
-export async function ensureMezoNetwork(): Promise<void> {
-  const provider = getInjectedProvider()
-  try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: MEZO_TESTNET_CHAIN_ID_HEX }],
-    })
-  } catch (error) {
-    const code = (error as { code?: number })?.code
-    if (code === 4902) {
-      // Network not added yet — add it.
-      await provider.request({
-        method: 'wallet_addEthereumChain',
-        params: [
-          {
-            chainId: MEZO_TESTNET_CHAIN_ID_HEX,
-            chainName: 'Mezo Testnet',
-            nativeCurrency: { name: 'BTC', symbol: 'BTC', decimals: 18 },
-            rpcUrls: [MEZO_RPC_URL],
-            blockExplorerUrls: [MEZO_EXPLORER_URL],
-          },
-        ],
-      })
-    } else {
-      throw error
+/** Check nested wallet error codes, including MetaMask's originalError. */
+export function hasErrorCode(error: unknown, code: number): boolean {
+  const seen = new Set<unknown>()
+  function walk(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || seen.has(value)) return false
+    seen.add(value)
+    const e = value as Record<string, unknown>
+    return Number(e.code) === code || walk(e.data) || walk(e.originalError) || walk(e.cause)
+  }
+  return walk(error)
+}
+
+export async function ensureMezoNetwork(provider: EIP1193Provider): Promise<void> {
+  const switchChain = () => provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MEZO_TESTNET_CHAIN_ID_HEX }] })
+  try { await switchChain(); return } catch (error) {
+    if (hasErrorCode(error, 4001)) throw error
+    try {
+      await provider.request({ method: 'wallet_addEthereumChain', params: [{
+        chainId: MEZO_TESTNET_CHAIN_ID_HEX, chainName: 'Mezo Testnet',
+        nativeCurrency: { name: 'BTC', symbol: 'BTC', decimals: 18 },
+        rpcUrls: [MEZO_RPC_URL], blockExplorerUrls: [MEZO_EXPLORER_URL],
+      }] })
+      await switchChain()
+    } catch (addError) {
+      // Preserve a pending request code if the follow-up fails differently.
+      if (hasErrorCode(error, -32002) && !hasErrorCode(addError, 4001) && !hasErrorCode(addError, -32002)) throw error
+      throw addError
     }
   }
 }
 
-export async function getConnectedChainId(): Promise<number | null> {
-  if (!hasInjectedWallet()) return null
-  try {
-    const hex = (await getInjectedProvider().request({
-      method: 'eth_chainId',
-    })) as string
-    return parseInt(hex, 16)
-  } catch {
-    return null
-  }
-}
-
-export async function getConnectedAccounts(): Promise<string[]> {
-  if (!hasInjectedWallet()) return []
-  try {
-    const accounts = (await getInjectedProvider().request({
-      method: 'eth_accounts',
-    })) as string[]
-    return accounts ?? []
-  } catch {
-    return []
-  }
-}
-
-/**
- * Connect the wallet: request accounts, then make sure we're on
- * Mezo Testnet (switching / adding the network automatically).
- * Returns the connected address and the chain id after switching.
- */
-export async function connectWallet(): Promise<{
-  address: string
-  chainId: number
-}> {
-  const provider = getInjectedProvider()
-  const accounts = (await provider.request({
-    method: 'eth_requestAccounts',
-  })) as string[]
-  if (!accounts || accounts.length === 0) {
-    throw new Error('No account was returned by the wallet.')
-  }
-  await ensureMezoNetwork()
-  const chainId = (await getConnectedChainId()) ?? MEZO_TESTNET_CHAIN_ID
-  return { address: accounts[0], chainId }
+export async function getConnectedChainId(provider: EIP1193Provider): Promise<number> {
+  const hex = await provider.request({ method: 'eth_chainId' }) as string
+  const id = Number.parseInt(hex, 16)
+  if (!Number.isFinite(id)) throw new Error(`Invalid wallet chain ID: ${hex}`)
+  return id
 }
 
 export async function fetchMusdBalance(address: string): Promise<bigint> {
@@ -140,8 +94,9 @@ export async function donateMusd(params: {
   from: string
   recipient: string
   amount: bigint
+  provider: EIP1193Provider
 }): Promise<string> {
-  const provider = getInjectedProvider()
+  const provider = params.provider
   const walletClient = createWalletClient({
     chain: mezoTestnet,
     transport: custom(provider),
@@ -163,27 +118,25 @@ export async function waitForReceipt(txHash: string) {
   })
 }
 
-export function isUserRejection(error: unknown): boolean {
-  const code = (error as { code?: number })?.code
-  const message = (error as Error)?.message ?? ''
-  return (
-    code === 4001 ||
-    code === -32603 && /rejected|denied|user/i.test(message) ||
-    /user rejected|user denied|rejected the request/i.test(message)
-  )
-}
-
-export function friendlyWalletError(error: unknown): string {
-  if (isUserRejection(error)) {
-    return 'You rejected the transaction in your wallet. No MUSD was sent. You can try again whenever you are ready.'
-  }
-  const message = (error as Error)?.message ?? 'Something went wrong.'
-  // Keep wallet errors short and plain-language where possible.
-  if (/insufficient funds/i.test(message)) {
-    return 'Your wallet does not have enough BTC (testnet) to pay the network fee for this transaction. Get some test BTC from the faucet below.'
-  }
-  if (/insufficient/i.test(message) && /balance/i.test(message)) {
-    return 'Your MUSD balance is too low for this donation.'
-  }
-  return message
+export type ErrorAction = 'connection' | 'network' | 'signature' | 'donation'
+export interface WalletError { message: string; details: string }
+export function walletError(error: unknown, action: ErrorAction): WalletError {
+  const e = error as { message?: unknown; shortMessage?: unknown; code?: unknown } | null
+  let details = typeof e?.message === 'string' ? e.message : typeof error === 'string' ? error : ''
+  if (!details) { try { details = JSON.stringify(error) || String(error) } catch { details = String(error) } }
+  if (e?.code !== undefined) details += ` (code: ${String(e.code)})`
+  const original = (error as { data?: { originalError?: { code?: number; message?: string } } })?.data?.originalError
+  if (original) details += `; original error: ${original.message ?? ''}${original.code !== undefined ? ` (code: ${original.code})` : ''}`
+  const rejected = hasErrorCode(error, 4001) || /user rejected|user denied|rejected the request/i.test(details)
+  let message: string
+  if (hasErrorCode(error, -32002)) message = 'A connection request is already open. Click the MetaMask icon in your browser toolbar to approve it.'
+  else if (rejected) message = {
+    connection: 'Wallet connection cancelled. Please try again when you are ready.',
+    network: 'Network switch cancelled. Your wallet is still connected; switch to Mezo Testnet to donate.',
+    signature: 'Signature cancelled. Your campaign was not created.',
+    donation: 'Donation cancelled in your wallet. No MUSD was sent.',
+  }[action]
+  else if (action === 'donation' && /insufficient funds/i.test(details)) message = 'Not enough test BTC for the network fee. Get test BTC from the faucet below.'
+  else message = { connection: 'Could not connect the wallet.', network: 'Could not switch to Mezo Testnet. Try the button again or add the network manually.', signature: 'Could not sign the campaign.', donation: 'The donation could not be completed.' }[action]
+  return { message, details }
 }

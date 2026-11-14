@@ -1,49 +1,23 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Header from './components/Header'
 import CreateCampaign from './components/CreateCampaign'
 import CampaignPage from './components/CampaignPage'
 import HelpSection from './components/HelpSection'
 import { campaignFromSearchParams, type Campaign } from './lib/campaign'
-import {
-  connectWallet,
-  friendlyWalletError,
-  getConnectedAccounts,
-  hasInjectedWallet,
-} from './lib/wallet'
+import { WalletProvider, useWallet } from './lib/WalletContext'
+import { WalletControls } from './components/WalletControls'
 
 function campaignFromLocation(): Campaign | null {
   return campaignFromSearchParams(window.location.search)
 }
 
-export default function App() {
+export default function App() { return <WalletProvider><AppContent /></WalletProvider> }
+
+function AppContent() {
   const [campaign, setCampaign] = useState<Campaign | null>(() =>
     campaignFromLocation(),
   )
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  const [connecting, setConnecting] = useState(false)
-  const [walletError, setWalletError] = useState<string | null>(null)
-
-  // Notice an already-connected wallet on load (without forcing a popup).
-  useEffect(() => {
-    let cancelled = false
-    async function check() {
-      if (!hasInjectedWallet()) return
-      const accounts = await getConnectedAccounts()
-      if (!cancelled && accounts.length > 0) setWalletAddress(accounts[0])
-    }
-    void check()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  useEffect(() => {
-    const provider = window.ethereum
-    if (!provider?.on) return
-    const onAccounts = (accounts: readonly `0x${string}`[]) => setWalletAddress(accounts[0] ?? null)
-    provider.on('accountsChanged', onAccounts)
-    return () => provider.removeListener('accountsChanged', onAccounts)
-  }, [])
+  const { address: walletAddress, connect: handleConnect, connecting } = useWallet()
 
   // Re-read the URL on back/forward navigation.
   useEffect(() => {
@@ -52,28 +26,15 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
-  const handleConnect = useCallback(async () => {
-    setConnecting(true)
-    setWalletError(null)
-    try {
-      const { address } = await connectWallet()
-      setWalletAddress(address)
-    } catch (error) {
-      setWalletError(friendlyWalletError(error))
-    } finally {
-      setConnecting(false)
-    }
-  }, [])
-
   return (
     <div className="app">
       <Header
         walletAddress={walletAddress}
         onConnect={handleConnect}
         connecting={connecting}
-        walletError={walletError}
       />
 
+      <WalletControls />
       <main className="container main">
         {campaign ? (
           <CampaignPage key={window.location.search} campaign={campaign} />

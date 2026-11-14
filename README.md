@@ -295,3 +295,7 @@ When a wallet is connected while creating, it must be the recipient wallet. The 
 4. Reject the signing request and confirm that no campaign link is created. The signature is not a transaction.
 
 The live-example button is hidden until `LIVE_EXAMPLE_URL` in `src/lib/constants.ts` is set to a real campaign link.
+
+### Wallet connection troubleshooting
+
+The app discovers EIP-6963 browser wallets; if more than one is installed, choose the wallet to use. If none announce themselves, the legacy injected browser wallet is used. A successful account connection stays visible even if switching networks fails. Use the **Wrong network** banner to retry or enter its manual Mezo Testnet settings. Account and network changes update the page. If a request is already open, check the wallet extension's toolbar icon. On a phone, open the campaign in the MetaMask app browser using the provided link. Error messages include a Details line for troubleshooting; never share your recovery phrase or private key.

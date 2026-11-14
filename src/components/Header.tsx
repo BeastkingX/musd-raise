@@ -4,14 +4,12 @@ interface HeaderProps {
   walletAddress: string | null
   onConnect: () => void
   connecting: boolean
-  walletError: string | null
 }
 
 export default function Header({
   walletAddress,
   onConnect,
   connecting,
-  walletError,
 }: HeaderProps) {
   return (
     <header className="site-header">
@@ -46,13 +44,6 @@ export default function Header({
           )}
         </div>
       </div>
-      {walletError && (
-        <div className="container">
-          <p className="alert alert-error" role="alert">
-            {walletError}
-          </p>
-        </div>
-      )}
     </header>
   )
 }
