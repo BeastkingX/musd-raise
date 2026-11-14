@@ -162,9 +162,7 @@ export default function DonateBox({ recipient, onDonationSuccess }: DonateBoxPro
     setStatus('waiting')
     try {
       // Make sure we're on Mezo Testnet before sending.
-      const { chainId: id } = await connectWallet().catch(() => ({
-        chainId: chainId ?? MEZO_TESTNET_CHAIN_ID,
-      }))
+      const { chainId: id } = await connectWallet()
       setChainId(id)
       if (id !== MEZO_TESTNET_CHAIN_ID) {
         throw new Error('Wallet is not on Mezo Testnet.')
@@ -178,7 +176,8 @@ export default function DonateBox({ recipient, onDonationSuccess }: DonateBoxPro
       setTxHash(hash)
       setStatus('confirming')
 
-      await waitForReceipt(hash)
+      const receipt = await waitForReceipt(hash)
+      if (receipt.status !== 'success') throw new Error('The transaction failed on the network. No donation was sent.')
       setStatus('success')
       // Refresh balance + campaign totals/supporters.
       await refreshBalance(walletAddress)
